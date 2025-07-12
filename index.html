@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Snake Tail Battle - 10 Unlockable AI Levels</title>
+<style>
+  body {
+    margin: 0; background: #121212; color: #00ffff;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    display: flex; justify-content: center; align-items: center; height: 100vh;
+    overflow: hidden;
+  }
+  #gameContainer {
+    position: relative;
+    width: 800px; height: 600px;
+    background: #222;
+    border-radius: 12px;
+    box-shadow: 0 0 20px #00ffff;
+  }
+  canvas {
+    display: block;
+    background: #111;
+    border-radius: 12px;
+  }
+  #menu {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(18,18,18,0.95);
+    display: flex; flex-direction: column;
+    justify-content: center; align-items: center;
+    color: #00ffff;
+    font-size: 2rem;
+    z-index: 10;
+    text-align: center;
+  }
+  #scoreboard {
+    position: absolute;
+    top: 10px; left: 10px;
+    color: #00ffff;
+    font-size: 1.2rem;
+    z-index: 5;
+    user-select: none;
+  }
+  .level-row {
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+    margin: 25px 0 15px 0;
+    gap: 18px;
+    flex-wrap: wrap;
+  }
+  .level-box {
+    width: 90px;
+    height: 90px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(45deg, #232, #6bffd5 70%);
+    color: #121212;
+    font-size: 1.2rem;
+    font-weight: bold;
+    border-radius: 14px;
+    box-shadow: 0 0 10px #6bffd5 inset, 0 0 8px #00ffff;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    border: 2px solid #6bffd5;
+    position: relative;
+  }
+  .level-box:hover:not(.locked) {
+    transform: scale(1.09);
+    box-shadow: 0 0 18px #6bffd5 inset, 0 0 18px #00ffff;
+    z-index: 2;
+  }
+  .level-box.locked {
+    background: #333;
+    color: #888;
+    cursor: not-allowed;
+    opacity: 0.5;
+    box-shadow: none;
+    border: 2px solid #333;
+  }
+  .level-label {
+    font-size: 1.0rem;
+    margin-top: 7px;
+    color: #00ffff;
+    opacity: 0.8;
+    font-weight: normal;
+  }
+  #menu button, #menu select {
+    margin-top: 18px;
+    padding: 15px 30px;
+    font-size: 1.2rem;
+    background: linear-gradient(45deg, #6bff8e, #6bffd5);
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    color: #121212;
+    box-shadow: 0 0 15px #6bff8e inset;
+    transition: all 0.3s ease;
+  }
+  #menu button:hover, #menu select:hover {
+    box-shadow: 0 0 30px #6bff8e inset;
+    transform: scale(1.05);
+  }
+</style>
+</head>
+<body>
+
+<div id="gameContainer">
+  <canvas id="gameCanvas" width="800" height="600"></canvas>
+  <div id="menu"></div>
+  <div id="scoreboard"></div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const menu = document.getElementById('menu');
+  const scoreboard = document.getElementById('scoreboard');
+
+  const gridSize = 20;
+  const cols = canvas.width / gridSize;
+  const rows = canvas.height / gridSize;
+
+  // --- 10 AI LEVELS CONFIG ---
+  const AI_LEVELS = [
+    "Novice", "Easy", "Normal", "Smart", "Skilled",
+    "Advanced", "Expert", "Master", "Genius", "Impossible"
+  ];
+
+  function getUnlockedLevel() {
+    return parseInt(localStorage.getItem('snake_unlocked_level') || '1', 10);
+  }
+  function setUnlockedLevel(lvl) {
+    localStorage.setItem('snake_unlocked_level', lvl);
+  }
+
+  function aStar(start, goal, isBlocked) {
+    const queue = [];
+    const visited = Array.from({length: cols}, () => Array(rows).fill(false));
+    const cameFrom = Array.from({length: cols}, () => Array(rows).fill(null));
+    queue.push({x: start.x, y: start.y, cost: 0, est: 0});
+    visited[start.x][start.y] = true;
+    function heuristic(a, b) {
+      let dx = Math.abs(a.x - b.x);
+      let dy = Math.abs(a.y - b.y);
+      dx = Math.min(dx, cols - dx);
+      dy = Math.min(dy, rows - dy);
+      return dx + dy;
+    }
+    while (queue.length > 0) {
+      queue.sort((a, b) => (a.cost + a.est) - (b.cost + b.est));
+      const node = queue.shift();
+      if (node.x === goal.x && node.y === goal.y) {
+        let path = [];
+        let curr = goal;
+        while (curr && !(curr.x === start.x && curr.y === start.y)) {
+          path.push(curr);
+          curr = cameFrom[curr.x][curr.y];
+        }
+        path.reverse();
+        return path;
+      }
+      for (const dir of Object.values(directions)) {
+        let nx = (node.x + dir.x + cols) % cols;
+        let ny = (node.y + dir.y + rows) % rows;
+        if (!visited[nx][ny] && !isBlocked(nx, ny)) {
+          visited[nx][ny] = true;
+          cameFrom[nx][ny] = {x: node.x, y: node.y};
+          queue.push({
+            x: nx,
+            y: ny,
+            cost: node.cost + 1,
+            est: heuristic({x: nx, y: ny}, goal)
+          });
+        }
+      }
+    }
+    return null;
+  }
+
+  const directions = {
+    up: { x: 0, y: -1 },
+    down: { x: 0, y: 1 },
+    left: { x: -1, y: 0 },
+    right: { x: 1, y: 0 }
+  };
+
+  class Player {
+    constructor(color, startX, startY, controls, isBot = false, name = '', aiLevel = 1) {
+      this.color = color;
+      this.head = { x: startX, y: startY };
+      this.body = [ {...this.head} ];
+      this.direction = directions.right;
+      this.nextDirection = this.direction;
+      this.growSegments = 3;
+      this.alive = true;
+      this.controls = controls;
+      this.score = 0;
+      this.isBot = isBot;
+      this.botMoveCooldown = 0;
+      this.name = name;
+      this.aiLevel = aiLevel;
+    }
+
+    setDirection(key) {
+      if (!this.alive || this.isBot) return;
+      const dir = this.controls[key];
+      if (!dir) return;
+      if ((dir.x === -this.direction.x && dir.y === -this.direction.y)) return;
+      this.nextDirection = dir;
+    }
+
+    move() {
+      if (!this.alive) return;
+      if (this.isBot) {
+        this.botMoveCooldown--;
+        if (this.botMoveCooldown <= 0) {
+          this.chooseBotDirection();
+          this.botMoveCooldown = 1;
+        }
+      }
+      this.direction = this.nextDirection;
+      const newHead = {
+        x: (this.head.x + this.direction.x + cols) % cols,
+        y: (this.head.y + this.direction.y + rows) % rows
+      };
+      this.body.unshift(newHead);
+      this.head = newHead;
+      if (this.growSegments > 0) {
+        this.growSegments--;
+      } else {
+        this.body.pop();
+      }
+    }
+
+    grow() {
+      this.growSegments += 3;
+      this.score++;
+    }
+
+    checkCollisionWithBody(x, y) {
+      return this.body.slice(1).some(seg => seg.x === x && seg.y === y);
+    }
+
+    kill() {
+      this.alive = false;
+    }
+
+    chooseBotDirection() {
+      // Level 1-2: Random moves, sometimes toward food
+      if (this.aiLevel <= 2) {
+        if (foods.length > 0 && Math.random() < (this.aiLevel === 2 ? 0.7 : 0.4)) {
+          this.greedyMoveToFood();
+        } else {
+          this.randomMove();
+        }
+        return;
+      }
+      // Level 3-4: Greedy toward food, avoids own body, uses A* to food
+      if (this.aiLevel <= 4) {
+        if (foods.length > 0) {
+          this.aStarToFood(false);
+        } else {
+          this.randomMove();
+        }
+        return;
+      }
+      // Level 5-7: A* pathfinding to food, avoids own and opponent's body
+      if (this.aiLevel <= 7) {
+        if (foods.length > 0) {
+          this.aStarToFood(true);
+        } else {
+          this.randomMove();
+        }
+        return;
+      }
+      // Level 8-10: A* pathfinding, avoids bodies, avoids dead ends (basic lookahead)
+      if (this.aiLevel >= 8) {
+        if (foods.length > 0) {
+          this.aStarToFood(true, true);
+        } else {
+          this.randomMove();
+        }
+        return;
+      }
+    }
+
+    greedyMoveToFood() {
+      let closestFood = foods[0];
+      let minDist = this.distance(this.head, closestFood);
+      for (let f of foods) {
+        let dist = this.distance(this.head, f);
+        if (dist < minDist) {
+          minDist = dist;
+          closestFood = f;
+        }
+      }
+      let bestDir = this.direction;
+      let bestDist = Infinity;
+      for (let dir of Object.values(directions)) {
+        const nx = (this.head.x + dir.x + cols) % cols;
+        const ny = (this.head.y + dir.y + rows) % rows;
+        if (this.body.slice(0, -1).some(seg => seg.x === nx && seg.y === ny)) continue;
+        const dist = this.distance({x: nx, y: ny}, closestFood);
+        if (dist < bestDist && !(dir.x === -this.direction.x && dir.y === -this.direction.y)) {
+          bestDist = dist;
+          bestDir = dir;
+        }
+      }
+      this.nextDirection = bestDir;
+    }
+
+    aStarToFood(avoidOpponent, avoidTraps) {
+      let closestFood = foods[0];
+      let minDist = this.distance(this.head, closestFood);
+      for (let f of foods) {
+        let dist = this.distance(this.head, f);
+        if (dist < minDist) {
+          minDist = dist;
+          closestFood = f;
+        }
+      }
+      let blockedSet = new Set(this.body.slice(0, -1).map(seg => seg.x + ',' + seg.y));
+      if (avoidOpponent) {
+        players.forEach(p => {
+          if (p !== this) {
+            p.body.forEach(seg => blockedSet.add(seg.x + ',' + seg.y));
+          }
+        });
+      }
+      const isBlocked = (x, y) => blockedSet.has(x + ',' + y);
+      let path = aStar(this.head, {x: closestFood.x, y: closestFood.y}, isBlocked);
+      if (avoidTraps && path && path.length > 0) {
+        const next = path[0];
+        let simBody = [ {...next}, ...this.body.slice(0, -1) ];
+        let simBlocked = new Set(simBody.slice(0, -1).map(seg => seg.x + ',' + seg.y));
+        const simIsBlocked = (x, y) => simBlocked.has(x + ',' + y);
+        let tail = simBody[simBody.length - 1];
+        let tailPath = aStar(next, tail, simIsBlocked);
+        if (!tailPath || tailPath.length === 0) {
+          this.randomMove();
+          return;
+        }
+      }
+      if (path && path.length > 0) {
+        const next = path[0];
+        const dx = (next.x - this.head.x + cols) % cols;
+        const dy = (next.y - this.head.y + rows) % rows;
+        let dir = null;
+        if (dx === 1 || dx === -(cols-1)) dir = directions.right;
+        else if (dx === -1 || dx === cols-1) dir = directions.left;
+        else if (dy === 1 || dy === -(rows-1)) dir = directions.down;
+        else if (dy === -1 || dy === rows-1) dir = directions.up;
+        if (dir && !(dir.x === -this.direction.x && dir.y === -this.direction.y)) {
+          this.nextDirection = dir;
+          return;
+        }
+      }
+      this.randomMove();
+    }
+
+    randomMove() {
+      const possibleDirs = Object.values(directions).filter(dir => {
+        const nx = (this.head.x + dir.x + cols) % cols;
+        const ny = (this.head.y + dir.y + rows) % rows;
+        return !this.body.slice(0, -1).some(seg => seg.x === nx && seg.y === ny);
+      });
+      if (possibleDirs.length === 0) {
+        this.nextDirection = this.direction;
+        return;
+      }
+      this.nextDirection = possibleDirs[Math.floor(Math.random()*possibleDirs.length)];
+    }
+
+    distance(a, b) {
+      let dx = Math.abs(a.x - b.x);
+      let dy = Math.abs(a.y - b.y);
+      dx = Math.min(dx, cols - dx);
+      dy = Math.min(dy, rows - dy);
+      return dx + dy;
+    }
+  }
+
+  class Food {
+    constructor(x, y) {
+      this.x = x;
+      this.y = y;
+      this.size = 1;
+      this.color = '#ffd56b';
+    }
+  }
+
+  let players = [];
+  let foods = [];
+  let gameRunning = false;
+  let gameInterval = null;
+  let currentMode = null; // 'single' or 'multi'
+  let currentLevel = 1;
+  const speed = 100;
+
+  const player1Controls = {
+    'w': directions.up,
+    'a': directions.left,
+    's': directions.down,
+    'd': directions.right
+  };
+  const player2Controls = {
+    'ArrowUp': directions.up,
+    'ArrowLeft': directions.left,
+    'ArrowDown': directions.down,
+    'ArrowRight': directions.right
+  };
+
+  function spawnFood() {
+    let x, y;
+    let safe = false;
+    while(!safe) {
+      x = Math.floor(Math.random() * cols);
+      y = Math.floor(Math.random() * rows);
+      safe = !players.some(p => p.body.some(seg => seg.x === x && seg.y === y));
+      if (safe) safe = !foods.some(f => f.x === x && f.y === y);
+    }
+    foods.push(new Food(x, y));
+  }
+
+  function ensureFoodCount() {
+    while (foods.length < 5) spawnFood();
+  }
+
+  function initGame(singlePlayer = false, level = 1) {
+    currentMode = singlePlayer ? 'single' : 'multi';
+    currentLevel = level;
+    players = [
+      new Player('#ff6b6b', 5, 5, player1Controls, false, 'Player WASD'),
+      new Player('#6bffd5', cols - 6, rows - 6, player2Controls, singlePlayer, singlePlayer ? 'AI' : 'Player Arrows', singlePlayer ? level : 1)
+    ];
+    foods = [];
+    for(let i=0; i<5; i++) spawnFood();
+    gameRunning = true;
+    updateScoreboard();
+  }
+
+  function drawSquare(x, y, color) {
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 15;
+    ctx.fillRect(x * gridSize, y * gridSize, gridSize, gridSize);
+    ctx.shadowBlur = 0;
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    foods.forEach(food => drawSquare(food.x, food.y, food.color));
+    players.forEach(player => {
+      if (!player.alive) return;
+      player.body.forEach((seg, idx) => {
+        const color = idx === 0 ? player.color : shadeColor(player.color, -30);
+        drawSquare(seg.x, seg.y, color);
+      });
+    });
+  }
+
+  function shadeColor(color, percent) {
+    let f=parseInt(color.slice(1),16),t=percent<0?0:255,p=percent<0?percent*-1:percent;
+    let R=f>>16,G=f>>8&0x00FF,B=f&0x0000FF;
+    return "#" + (0x1000000 + (Math.round((t-R)*p/100)+R)*0x10000 + (Math.round((t-G)*p/100)+G)*0x100 + (Math.round((t-B)*p/100)+B)).toString(16).slice(1);
+  }
+
+  function checkFoodCollision() {
+    players.forEach(player => {
+      if (!player.alive) return;
+      foods = foods.filter(food => {
+        if (player.head.x === food.x && player.head.y === food.y) {
+          player.grow();
+          spawnFood();
+          return false;
+        }
+        return true;
+      });
+    });
+  }
+
+  function checkPlayerCollisions() {
+    players.forEach(player => {
+      if (!player.alive) return;
+      if (player.checkCollisionWithBody(player.head.x, player.head.y)) {
+        player.kill();
+        player.body.forEach(seg => foods.push(new Food(seg.x, seg.y)));
+        handleGameOver(player);
+        return;
+      }
+      players.forEach(other => {
+        if (!other.alive) return;
+        if (player === other) return;
+        if (other.body.slice(1).some(seg => seg.x === player.head.x && seg.y === player.head.y)) {
+          player.kill();
+          player.body.forEach(seg => foods.push(new Food(seg.x, seg.y)));
+          handleGameOver(player);
+        }
+      });
+    });
+  }
+
+  function handleGameOver(deadPlayer) {
+    gameRunning = false;
+    clearInterval(gameInterval);
+    let message = '';
+    let won = false;
+    if (currentMode === 'single') {
+      if (deadPlayer.isBot) {
+        message = `You won Level ${currentLevel}!`;
+        won = true;
+      } else {
+        message = `AI beat you on Level ${currentLevel}.`;
+      }
+    } else {
+      if (deadPlayer.name === 'Player WASD') {
+        message = 'Player Arrows won!';
+      } else {
+        message = 'Player WASD won!';
+      }
+    }
+    showRestartMenu(message, won);
+  }
+
+  function updateScoreboard() {
+    let levelInfo = '';
+    if (currentMode === 'single') {
+      levelInfo = `<div style="font-size:1rem;">AI Level: ${currentLevel} (${AI_LEVELS[currentLevel-1]})</div>`;
+    }
+    scoreboard.innerHTML = levelInfo +
+      players.map((p, i) =>
+      `<div style="color:${p.color}">${p.name}: ${p.score} ${p.alive ? '' : '(Dead)'}</div>`
+    ).join('');
+  }
+
+  function gameTick() {
+    if (!gameRunning) return;
+    players.forEach(player => player.move());
+    checkFoodCollision();
+    checkPlayerCollisions();
+    ensureFoodCount();
+    updateScoreboard();
+    draw();
+  }
+
+  function showRestartMenu(message, won=false) {
+    let nextLevelUnlocked = false;
+    let unlockedLevel = getUnlockedLevel();
+    if (won && currentMode === 'single' && currentLevel < 10 && unlockedLevel < currentLevel+1) {
+      setUnlockedLevel(currentLevel+1);
+      nextLevelUnlocked = true;
+    }
+    menu.innerHTML = `
+      <div>${message}</div>
+      ${nextLevelUnlocked ? `<div style="font-size:1.2rem;margin-top:10px;">Level ${currentLevel+1} unlocked!</div>` : ""}
+      <button id="restartBtn">Restart</button>
+      <button id="mainMenuBtn">Main Menu</button>
+    `;
+    menu.style.display = 'flex';
+    document.getElementById('restartBtn').onclick = () => {
+      if (currentMode === 'single') {
+        initGame(true, currentLevel);
+      } else {
+        initGame(false, 1);
+      }
+      menu.style.display = 'none';
+      gameInterval = setInterval(gameTick, speed);
+    };
+    document.getElementById('mainMenuBtn').onclick = () => {
+      showMainMenu();
+    };
+  }
+
+  function showLevelSelectionMenu() {
+    const unlockedLevel = getUnlockedLevel();
+    let levelBoxes = '';
+    for (let i = 1; i <= 10; ++i) {
+      levelBoxes += `
+        <div class="level-box${i > unlockedLevel ? ' locked' : ''}" data-level="${i}" ${i > unlockedLevel ? 'title="Win previous levels to unlock"' : ''}>
+          ${i}
+          <div class="level-label">${AI_LEVELS[i-1]}</div>
+        </div>
+      `;
+    }
+    menu.innerHTML = `
+      <div>AI Level Selection</div>
+      <div style="font-size:1.1rem;margin-bottom:10px;">Win each level to unlock the next!</div>
+      <div class="level-row">${levelBoxes}</div>
+      <button id="backBtn">Back</button>
+    `;
+    menu.style.display = 'flex';
+    document.querySelectorAll('.level-box').forEach(box => {
+      if (!box.classList.contains('locked')) {
+        box.onclick = () => {
+          const lvl = parseInt(box.getAttribute('data-level'), 10);
+          initGame(true, lvl);
+          menu.style.display = 'none';
+          if (gameInterval) clearInterval(gameInterval);
+          gameInterval = setInterval(gameTick, speed);
+        };
+      }
+    });
+    document.getElementById('backBtn').onclick = () => {
+      showMainMenu();
+    };
+  }
+
+  function showMainMenu() {
+    menu.innerHTML = `
+      <div>Snake Tail Battle</div>
+      <div style="margin-top: 15px; font-size: 1.2rem;">Choose Mode:</div>
+      <button id="singlePlayerBtn">Single Player (vs Bot)</button>
+      <button id="multiPlayerBtn">Two Players</button>
+    `;
+    menu.style.display = 'flex';
+    document.getElementById('singlePlayerBtn').onclick = () => {
+      showLevelSelectionMenu();
+    };
+    document.getElementById('multiPlayerBtn').onclick = () => {
+      initGame(false, 1);
+      menu.style.display = 'none';
+      if (gameInterval) clearInterval(gameInterval);
+      gameInterval = setInterval(gameTick, speed);
+    };
+  }
+
+  // Pause menu on ESC
+  let paused = false;
+  window.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && gameRunning) {
+      e.preventDefault();
+      if (!paused) {
+        paused = true;
+        clearInterval(gameInterval);
+        menu.innerHTML = `
+          <div>Game Paused</div>
+          <button id="continueBtn">Continue</button>
+          <button id="mainMenuBtn">Main Menu</button>
+        `;
+        menu.style.display = 'flex';
+        document.getElementById('continueBtn').onclick = () => {
+          paused = false;
+          menu.style.display = 'none';
+          gameInterval = setInterval(gameTick, speed);
+        };
+        document.getElementById('mainMenuBtn').onclick = () => {
+          paused = false;
+          menu.style.display = 'none';
+          showMainMenu();
+        };
+      }
+    }
+  });
+
+  window.addEventListener('keydown', e => {
+    players.forEach(player => player.setDirection(e.key));
+  });
+
+  showMainMenu();
+  draw();
+})();
+</script>
+
+</body>
+</html>
